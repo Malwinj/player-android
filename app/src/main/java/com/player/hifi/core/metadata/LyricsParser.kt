@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import com.player.hifi.core.model.Track
 import java.io.File
+import java.io.FileInputStream
 
 data class LyricLine(
     val timestampMs: Long,
@@ -39,7 +40,23 @@ object LyricsParser {
             }
         }
 
-        // 2. Пытаемся извлечь встроенный текст (USLT / SYLT / Vorbis LYRICS) из заголовка файла
+        // 2. Embedded tags (ID3 USLT/SYLT/TXXX, FLAC and Ogg Vorbis comments, MP4 lyrics atom),
+        //    read from the tag area only, so large cover art no longer hides the lyrics.
+        runCatching {
+            val uri = Uri.parse(track.uriString)
+            contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                FileInputStream(pfd.fileDescriptor).use { stream ->
+                    val embedded = EmbeddedLyricsReader.read(stream.channel)
+                    if (embedded != null) {
+                        val parsed = parseRawLyrics(embedded)
+                        if (parsed != null) return parsed
+                    }
+                }
+            }
+        }
+
+        // 3. Legacy fallback for containers the reader does not cover: look for LRC text or a
+        //    LYRICS= tag in the first 128 KB of the file.
         runCatching {
             val uri = Uri.parse(track.uriString)
             contentResolver.openInputStream(uri)?.use { stream ->
@@ -51,7 +68,6 @@ object LyricsParser {
                     if (vorbisLyricsMatch != null) {
                         return parseRawLyrics(vorbisLyricsMatch.groupValues[1])
                     }
-                    // Если в тегах есть встроенная LRC-разметка
                     if (rawWindow.contains("[00:") || rawWindow.contains("[01:")) {
                         val startIdx = rawWindow.indexOf("[0")
                         if (startIdx >= 0) {
