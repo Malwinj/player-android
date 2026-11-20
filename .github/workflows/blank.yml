@@ -27,7 +27,10 @@ jobs:
                 android.defaultConfig.ndk.abiFilters.add('arm64-v8a')
               } catch (Throwable t) { println "lean: abiFilters skipped: $t" }
               try {
-                android.buildTypes.getByName('release').debuggable = false
+                def rel = android.buildTypes.getByName('release')
+                rel.debuggable = false
+                rel.minifyEnabled = false
+                rel.shrinkResources = false
               } catch (Throwable t) { println "lean: release config skipped: $t" }
               try { android.lint.checkReleaseBuilds = false } catch (Throwable t) { println "lean: lint skipped: $t" }
             }
