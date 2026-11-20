@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.player.hifi"
-        minSdk = 31
+        minSdk = 30
         targetSdk = 35
         versionCode = 2
         versionName = "1.1 beta"
@@ -21,7 +21,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
