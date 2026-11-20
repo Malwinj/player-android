@@ -1,0 +1,68 @@
+name: Build lean APK (no R8)
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Write init script (arm64 only)
+        run: |
+          cat > "$RUNNER_TEMP/lean.init.gradle" <<'EOF'
+          allprojects {
+            afterEvaluate { p ->
+              def android = p.extensions.findByName('android')
+              if (android == null || !p.plugins.hasPlugin('com.android.application')) return
+              try {
+                android.defaultConfig.ndk.abiFilters.clear()
+                android.defaultConfig.ndk.abiFilters.add('arm64-v8a')
+              } catch (Throwable t) { println "lean: abiFilters skipped: $t" }
+              try {
+                android.buildTypes.getByName('release').debuggable = false
+              } catch (Throwable t) { println "lean: release config skipped: $t" }
+              try { android.lint.checkReleaseBuilds = false } catch (Throwable t) { println "lean: lint skipped: $t" }
+            }
+          }
+          EOF
+
+      - run: chmod +x gradlew
+      - run: ./gradlew assembleRelease --no-daemon --stacktrace -I "$RUNNER_TEMP/lean.init.gradle"
+
+      - name: Restore signing key
+        uses: actions/cache@v4
+        with:
+          path: ks.jks
+          key: signing-key-v1
+
+      - name: Create key if missing
+        run: |
+          [ -f ks.jks ] || keytool -genkeypair -keystore ks.jks -alias key \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass changeit -keypass changeit -dname "CN=Personal Build"
+
+      - name: Align and sign
+        run: |
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          "$ANDROID_HOME/build-tools/$BT/zipalign" -f -p 4 "$APK" aligned.apk
+          "$ANDROID_HOME/build-tools/$BT/apksigner" sign --ks ks.jks \
+            --ks-pass pass:changeit --key-pass pass:changeit \
+            --out player-arm64.apk aligned.apk
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs player-arm64.apk
+          ls -lh player-arm64.apk
+          unzip -l player-arm64.apk | sort -k1 -n -r | head -15
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: player-arm64
+          path: player-arm64.apk
+          if-no-files-found: error
